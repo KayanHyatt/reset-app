@@ -1,3 +1,4 @@
+// src/screens/AuthScreen.tsx
 import React, { useState } from "react";
 import {
   Alert,
@@ -32,6 +33,16 @@ function emailPrefix(email: string) {
   return normalizeUsername(part.replace(/[^a-z0-9_]/g, "_").slice(0, 24));
 }
 
+/**
+ * IMPORTANT FIX:
+ * - On signup, we now write BOTH `display_name` and `username` into Supabase user metadata.
+ *   Many Supabase "create profile on signup" triggers read raw_user_meta_data->>'username'.
+ *   If your DB expects username (NOT NULL/UNIQUE), missing it can cause:
+ *   "Database error saving new user"
+ *
+ * OPTIONAL IMPROVEMENT:
+ * - Hide Username input on Confirm screen to reduce confusion.
+ */
 export default function AuthScreen() {
   const [mode, setMode] = useState<Mode>("signup");
   const [email, setEmail] = useState("");
@@ -40,7 +51,7 @@ export default function AuthScreen() {
   // Username = display name (single field)
   const [username, setUsername] = useState("");
 
-  // Confirmation code from email (can be 6–10 digits; you said you see 8)
+  // Confirmation code from email (can be 6–10 digits)
   const [confirmCode, setConfirmCode] = useState("");
 
   const [loading, setLoading] = useState(false);
@@ -60,12 +71,12 @@ export default function AuthScreen() {
 
     setLoading(true);
 
-    // Create account. If confirm-email is ON, user must confirm before they can log in.
+    // ✅ FIX: include BOTH display_name and username in metadata
     const { error } = await supabase.auth.signUp({
       email: e,
       password: p,
       options: {
-        data: { display_name: u }, // username stored in user metadata
+        data: { display_name: u, username: u },
       },
     });
 
@@ -92,7 +103,7 @@ export default function AuthScreen() {
     setLoading(true);
 
     // IMPORTANT: for confirming a new signup use type: "signup"
-    const { data, error } = await supabase.auth.verifyOtp({
+    const { error } = await supabase.auth.verifyOtp({
       email: e,
       token,
       type: "signup",
@@ -102,8 +113,8 @@ export default function AuthScreen() {
 
     if (error) return Alert.alert("Confirmation failed", error.message);
 
-    // If verification created a session, you’re now logged in.
-    // Create profile best-effort (only if missing).
+    // Best-effort profile creation (only if missing).
+    // This is a fallback: ideally your DB trigger creates the profile automatically.
     try {
       const existing = await getMyProfile();
       if (!existing) {
@@ -134,7 +145,6 @@ export default function AuthScreen() {
     setLoading(false);
 
     if (error) {
-      // If they forgot to confirm, guide them
       if (error.message.toLowerCase().includes("confirm")) {
         Alert.alert("Email not confirmed", "Please confirm your email first.");
         setMode("confirm");
@@ -201,17 +211,20 @@ export default function AuthScreen() {
           </>
         )}
 
-        <View style={{ gap: 10 }}>
-          <Muted>Username {mode === "login" ? "(optional)" : ""}</Muted>
-          <TextInput
-            value={username}
-            onChangeText={setUsername}
-            placeholder="e.g. reset_girl"
-            placeholderTextColor={theme.colors.muted}
-            autoCapitalize="none"
-            style={styles.input}
-          />
-        </View>
+        {/* Username should be on signup/login. Hide on confirm to reduce confusion. */}
+        {mode !== "confirm" && (
+          <View style={{ gap: 10 }}>
+            <Muted>Username {mode === "login" ? "(optional)" : ""}</Muted>
+            <TextInput
+              value={username}
+              onChangeText={setUsername}
+              placeholder="e.g. reset_girl"
+              placeholderTextColor={theme.colors.muted}
+              autoCapitalize="none"
+              style={styles.input}
+            />
+          </View>
+        )}
 
         {mode === "confirm" && (
           <View style={{ gap: 10 }}>
